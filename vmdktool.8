@@ -1,0 +1,203 @@
+.\"
+.\" Copyright (c) 2009-2012 Brian Somers <brian@Awfulhak.org>
+.\" All rights reserved.
+.\"
+.\" Redistribution and use in source and binary forms, with or without
+.\" modification, are permitted provided that the following conditions
+.\" are met:
+.\" 1. Redistributions of source code must retain the above copyright
+.\"    notice, this list of conditions and the following disclaimer.
+.\" 2. Redistributions in binary form must reproduce the above copyright
+.\"    notice, this list of conditions and the following disclaimer in the
+.\"    documentation and/or other materials provided with the distribution.
+.\"
+.\" THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+.\" ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+.\" IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+.\" ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+.\" FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+.\" DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+.\" OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+.\" HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+.\" LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+.\" OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+.\" SUCH DAMAGE.
+.\"
+.Dd February 24, 2012
+.Os
+.Nm vmdktool
+.Nd VMDK file converter
+.Sh SYNOPSIS
+.Nm
+.Op Fl di
+.Op Fl r Ar fn1.raw
+.Op Fl s Ar fn2.raw
+.Op Fl t Ar sec
+.Oo
+.Op Fl c Ar size
+.Op Fl z Ar zstr
+.Fl v Ar fn3.vmdk
+.Oc
+.Ar file
+.Sh DESCRIPTION
+The
+.Nm
+utility converts raw filesystems to the VMDK format and vice versa.
+It can also produce information for a given VMDK file.
+.Pp
+.Nm
+was written based on
+.Rs
+.%A "VMware Inc."
+.%T "Virtual Disk Format 1.1"
+.%R "Revision: 20071113 Version: 1.1 Item: NP-ENG-Q204-099"
+.%U http://www.vmware.com/interfaces/vmdk.html
+.%D "November 2007"
+.Re
+.Pp
+The switches and command line arguments behave as follows:
+.Bl -tag -width xxxx -offset xxxx
+.It Fl c Ar size
+Use disk capacity
+.Ar size
+rather than the size of
+.Ar file .
+The
+.Ar size
+value is in bytes unless suffixed by one of the following:
+.Bl -tag -width xxx -offset xxxx
+.It Ar k
+kilobytes (1024 bytes).
+.It Ar M
+megabytes (1048576 bytes).
+.It Ar G
+gigabytes (1073741824 bytes).
+.It Ar T
+terabytes (1099511627776 bytes).
+.It Ar P
+petabytes (1125899906842624 bytes).
+.It Ar E
+exabytes (1152921504606846976 bytes).
+.El
+.It Fl d
+Increase diagnostics.
+.It Fl i
+Show VMDK info from
+.Ar file .
+.It Fl r Ar fn1.raw
+Read random vmdk data from
+.Ar file ,
+write raw data to
+.Ar fn1.raw .
+.It Fl s Ar fn2.raw
+Read stream vmdk data from
+.Ar file ,
+write raw data to
+.Ar fn2.raw .
+.It Fl t Ar sec
+Show VMDK table info at sector
+.Ar sec .
+.It Fl v Ar fn3.vmdk
+Read raw data from
+.Ar file ,
+write VMDK data to
+.Ar fn3.vmdk .
+.It Fl z Ar zstr
+Set the deflate strength to
+.Ar zstr .
+.It file
+A raw disk or VMDK image.
+.Ar file
+is always the input file and is opened for reading.
+If
+.Fl v
+is being used,
+.Ar file
+may be a character device (but must be seekable).
+.El
+.Pp
+When using the
+.Fl r
+or
+.Fl s
+switches, the output file
+.Ar fn1.raw
+or
+.Ar fn2.raw
+will be the same.
+The only difference is in how we read the vmdk file; using random access in a
+.Qq whatever's convenient
+manner, or as a stream, allowing
+.Ar file
+to be a character special file.
+.Pp
+A given VMDK must be stream-optimized in order for
+.Nm
+to read it
+.Pq with the Fl s No switch
+as a stream.
+The inverse however is not true;
+any VMDK file may be read using random access.
+.Sh EXAMPLES
+To obtain high level information about
+.Ar file.vmdk :
+.Dl vmdktool -i file.vmdk
+.Pp
+To convert a raw filesystem image
+.Ar fs.raw
+to a stream-optimized vmdk file:
+.Dl vmdktool -z9 -v fs.vmdk fn.raw
+.Pp
+To convert the same raw filesystem image but set the virtual disk size to 2GB:
+.Dl vmdktool -c2G -z9 -vfs.vmdk fn.raw
+.Pp
+To modify the content of partition 1 on
+.Ar fs.vmdk ,
+the following might be done on a
+.Fx
+system:
+.Dl vmdktool -s tmp.raw fs.vmdk
+.Dl unit=$(mdconfig -a -t vnode -f tmp.raw -n)
+.Dl mount /dev/md${unit}a /mnt
+.Dl echo added >/mnt/added
+.Dl umount /mnt
+.Dl mdconfig -du$unit
+.Dl vmdktool -vfs.vmdk -z9 tmp.raw
+.Dl rm tmp.raw
+.Pp
+To do the same on a linux system:
+.Dl vmdktool -s tmp.raw fs.vmdk
+.Dl bounds=$(echo p | sudo fdisk -u tmp.raw 2>/dev/null | grep tmp.raw1 | awk '{print $3, $4}')
+.Dl off=$((${bounds% *} * 512)); sz=$((${bounds#* } * 512 - $off))
+.Dl loop=$(losetup -o $off --sizelimit $sz -f --show tmp.raw)
+.Dl mount $loop /mnt
+.Dl echo added >/mnt/added
+.Dl umount /mnt
+.Dl losetup -d $loop
+.Dl vmdktool -vfs.vmdk -z9 tmp.raw
+.Dl rm tmp.raw
+.Sh SEE ALSO
+.Xr fdisk 8 ,
+.Xr mdconfig 8 ,
+.Xr newfs 8 .
+.Sh HISTORY
+.Nm
+was originally written by
+.An Brian Somers Aq brian@Awfulhak.org
+in 2009 after a great deal of frustration over not
+finding any free tools to create VMDK files.
+It was updated at various points and
+.Qq donated
+to various companies where the author worked, finally being released to the
+general public in 2012.
+The eventual release to the general public is possibly a little late given
+that a revised
+.Em version 5.0 
+document was released by
+.Nm VMware
+at the end of 2011.
+.Pp
+Although developed under
+.Fx ,
+.Nm
+should build fairly easily under Linux and OSX.
