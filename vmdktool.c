@@ -80,7 +80,7 @@ struct Marker {
 	} u;
 } __attribute__((__packed__));
 
-#define VMDK_MAGIC	ntohl(*(const uint32_t *)"VMDK")
+#define VMDK_MAGIC	(('V' << 24) | ('M' << 16) | ('D' << 8) | 'K')
 
 #define COMPRESSION_NONE	0
 #define COMPRESSION_DEFLATE	1
@@ -112,6 +112,7 @@ usage(void)
 	    "[-t sec]\n");
 	fprintf(stderr, "                [[-c size] [-z zstr] -v fn3.vmdk] "
 	    "file\n");
+	fprintf(stderr, "       vmdktool -V\n");
 	fprintf(stderr, "       -c => Use disk capacity 'size' rather than "
 	    "the size of 'file'\n");
 	fprintf(stderr, "       -d => Increase diagnostics\n");
@@ -121,6 +122,7 @@ usage(void)
 	fprintf(stderr, "       -s => Read stream vmdk data, "
 	    "write raw data to fn2.raw\n");
 	fprintf(stderr, "       -t => Show vmdk table info at sector 'sec'\n");
+	fprintf(stderr, "       -V => Show the version number and exit\n");
 	fprintf(stderr, "       -v => Read raw data, write vmdk data to "
 	    "fn3.vmdk\n");
 	fprintf(stderr, "       -z => Set the deflate strength to 'zstr'\n");
@@ -388,7 +390,7 @@ vmdkshowtable(int fd, uint32_t pos, uint32_t type,
 {
 	char block[SECTORSZ];
 	const char *typestr;
-	uint32_t *entry;
+	uint32_t entry;
 	int blk, blks;
 	unsigned n;
 
@@ -410,12 +412,12 @@ vmdkshowtable(int fd, uint32_t pos, uint32_t type,
 	lseek(fd, pos * SECTORSZ, SEEK_SET);
 	for (blk = 0; blk < blks; blk++) {
 		aread(fd, block, SECTORSZ);
-		entry = (uint32_t *)block;
 		printf("   ");
-		for (n = 0; n < SECTORSZ / sizeof *entry; n++) {
+		for (n = 0; n < SECTORSZ / 4; n++) {
+			memcpy(&entry, block + n * 4, 4);
 			if (n && n % 8 == 0)
 				printf("\n   ");
-			printf(" %08x", entry[n]);
+			printf(" %08x", entry);
 		}
 		printf("\n");
 	}
@@ -512,13 +514,15 @@ readentry(int ifd, SectorType sec, SectorType entry)
 {
 	char buf[SECTORSZ];
 	int itemsperblock;
+	uint32_t val;
 
 	itemsperblock = SECTORSZ / sizeof(uint32_t);
 
 	lseek(ifd, (sec + entry / itemsperblock) * SECTORSZ, SEEK_SET);
 	aread(ifd, buf, SECTORSZ);
 
-	return ((uint32_t *)buf)[entry % 128];
+	memcpy(&val, buf + 4 * (entry % 128), 4);
+	return val;
 }
 
 static void
@@ -595,8 +599,8 @@ raw2grain(char *grain, int ofd, SectorType sec, int zstrength)
 	z_stream strm;
 	int i, ret;
 
-	for (i = SET_GRAINSZ * SECTORSZ / sizeof(uint32_t); i; i--)
-		if (((uint32_t *)grain)[i - 1])
+	for (i = SET_GRAINSZ * SECTORSZ; i; i--)
+		if (grain[i - 1])
 			break;
 	if (!i)
 		return 0;	/* No data */
@@ -698,8 +702,7 @@ allraw2grains(int ifd, uint64_t capacity, int ofd, int zstrength)
 		if (got) {
 			read_total += got;
 			ent = raw2grain(grain, ofd, sec, zstrength);
-			((uint32_t *)mtbl)
-			    [SECTORSZ / sizeof(uint32_t) + mtblent] = ent;
+			memcpy((char *)mtbl + SECTORSZ + mtblent * 4, &ent, 4);
 			mtblent++;
 		}
 
@@ -716,7 +719,7 @@ allraw2grains(int ifd, uint64_t capacity, int ofd, int zstrength)
 				mdirsz += SECTORSZ;
 				assert(n * sizeof(uint32_t) < mdirsz);
 			}
-			*((uint32_t *)mdir + n) = ent;
+			memcpy((char *)mdir + n * 4, &ent, 4);
 			memset(mtbl, '\0', SECTORSZ + mtblsz);
 			mtblent = 0;
 		}
@@ -811,7 +814,7 @@ main(int argc, char **argv)
 	/* make getopt() in Linux more like BSD */
 	setenv("POSIXLY_CORRECT", "TRUE", 0);
 
-	while ((ch = getopt(argc, argv, ":c:dir:s:t:v:z:")) != -1) {
+	while ((ch = getopt(argc, argv, ":c:dir:s:t:Vv:z:")) != -1) {
 		switch (ch) {
 		case 'c':
 			if (expand_number(optarg, &capacity)) {
@@ -837,6 +840,10 @@ main(int argc, char **argv)
 			optt = strtoul(optarg, &end, 0);
 			if (!optt || *end)
 				return usage();
+			break;
+		case 'V':
+			printf("vmdktool version 1.1\n");
+			return 0;
 			break;
 		case 'v':
 			vmdkfn = optarg;
