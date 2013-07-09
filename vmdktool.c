@@ -92,6 +92,7 @@ struct Marker {
 
 #define FLAGBIT_NL		(1 << 0)
 #define FLAGBIT_RGT		(1 << 1)
+#define FLAGBIT_ZGGTE		(1 << 2)
 #define FLAGBIT_COMPRESSED	(1 << 16)
 #define FLAGBIT_MARKERS		(1 << 17)
 #define SECTORSZ		512
@@ -180,6 +181,8 @@ vmdkshow(const struct SparseExtentHeader *h)
 		sprintf(buf + strlen(buf),
 		    ", redundant grain table [0x%llu]",
 		    (unsigned long long)h->rgdOffset);
+	if (h->flags & FLAGBIT_ZGGTE)
+		sprintf(buf + strlen(buf), ", zero-grain GTE");
 	if (h->flags & FLAGBIT_COMPRESSED) {
 		strcat(buf, ", compressed grains");
 		switch (h->compressAlgorithm) {
@@ -325,7 +328,7 @@ vmdkinfo(const char *fn, int fd, struct SparseExtentHeader *h, int showddb)
 
 static void
 marker2grain(int ifd, const struct SparseExtentHeader *h,
-    const struct Marker *m, char *grain, char **buf, size_t *bufsz)
+    const struct Marker *m, unsigned char *grain, unsigned char **buf, size_t *bufsz)
 {
 	z_stream strm;
 	ssize_t want;
@@ -427,7 +430,7 @@ static void
 vmdkparsestream(int ifd, struct SparseExtentHeader *h, int ofd)
 {
 	struct Marker *m;
-	char buf[sizeof *m], *grain, *dbuf;
+	unsigned char buf[sizeof *m], *grain, *dbuf;
 	SectorType mtblblks, mdirblks;
 	struct SparseExtentHeader f;
 	size_t dbufsz;
@@ -527,15 +530,15 @@ readentry(int ifd, SectorType sec, SectorType entry)
 
 static void
 grain2raw(int ifd, const struct SparseExtentHeader *h, int ofd, SectorType n,
-    char **buf, size_t *bufsz)
+    unsigned char **buf, size_t *bufsz)
 {
 	SectorType blk, tbl;
 	struct Marker m;
-	char *grain;
+	unsigned char *grain;
 
 	if ((tbl = readentry(ifd, h->gdOffset, n / h->numGTEsPerGT)) == 0)
 		return;
-	if ((blk = readentry(ifd, tbl, n % h->numGTEsPerGT)) == 0)
+	if ((blk = readentry(ifd, tbl, n % h->numGTEsPerGT)) <= 1)
 		return;
 
 	blk *= SECTORSZ;
@@ -566,7 +569,7 @@ allgrains2raw(int ifd, const struct SparseExtentHeader *h, int ofd)
 {
 	SectorType grains, n;
 	size_t dbufsz;
-	char *dbuf;
+	unsigned char *dbuf;
 
 	dbuf = NULL;
 	dbufsz = 0;
@@ -592,7 +595,7 @@ setsize(int fd, SectorType capacity)
 }
 
 static uint32_t
-raw2grain(char *grain, int ofd, SectorType sec, int zstrength)
+raw2grain(unsigned char *grain, int ofd, SectorType sec, int zstrength)
 {
 	off_t start, end;
 	struct Marker m;
@@ -614,14 +617,14 @@ raw2grain(char *grain, int ofd, SectorType sec, int zstrength)
 	strm.avail_in = SET_GRAINSZ * SECTORSZ;
 	strm.next_in = grain;
 	strm.avail_out = SECTORSZ - 12;
-	strm.next_out = (char *)&m + 12;
+	strm.next_out = (unsigned char *)&m + 12;
 	ret = Z_OK;
 	while (ret == Z_OK) {
 		ret = deflate(&strm, Z_FINISH);
 		assert(ret == Z_OK || ret == Z_STREAM_END);
 		awrite(ofd, &m, sizeof m - strm.avail_out, "compressed grain");
 		strm.avail_out = SECTORSZ;
-		strm.next_out = (char *)&m;
+		strm.next_out = (unsigned char *)&m;
 	}
 	deflateEnd(&strm);
 
@@ -650,10 +653,11 @@ raw2grain(char *grain, int ofd, SectorType sec, int zstrength)
 static void
 allraw2grains(int ifd, uint64_t capacity, int ofd, int zstrength)
 {
-	char descblk[SECTORSZ], grain[SET_GRAINSZ * SECTORSZ];
+        unsigned char grain[SET_GRAINSZ * SECTORSZ];
 	struct Marker eos, footer, *mdir, *mtbl;
 	struct SparseExtentHeader h;
 	int mdirent, mtblent, n;
+	char descblk[SECTORSZ];
 	size_t mdirsz, mtblsz;
 	uint64_t read_total;
 	SectorType sec;
@@ -794,7 +798,7 @@ main(int argc, char **argv)
 	char block[SECTORSZ], *dbuf, *end;
 	int ch, ifd, outspec, ofd, opti, zstrength;
 	struct SparseExtentHeader h;
-	uint64_t capacity;
+	int64_t capacity;
 	uint32_t optt;
 	struct Marker *m;
 	SectorType sec;
@@ -842,7 +846,7 @@ main(int argc, char **argv)
 				return usage();
 			break;
 		case 'V':
-			printf("vmdktool version 1.1\n");
+			printf("vmdktool version 1.3\n");
 			return 0;
 			break;
 		case 'v':
