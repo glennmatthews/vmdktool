@@ -710,7 +710,7 @@ allraw2grains(int ifd, uint64_t capacity, int ofd, int zstrength)
 			mtblent++;
 		}
 
-		if (mtblent == SET_GTESPERGT || !got) {
+		if (mtblent == SET_GTESPERGT || (mtblent && !got)) {
 			mtbl->val = mtblsz / SECTORSZ;
 			mtbl->size = 0;
 			mtbl->u.type = MARKER_GT;
@@ -846,7 +846,7 @@ main(int argc, char **argv)
 				return usage();
 			break;
 		case 'V':
-			printf("vmdktool version 1.3\n");
+			printf("vmdktool version 1.4\n");
 			return 0;
 			break;
 		case 'v':
